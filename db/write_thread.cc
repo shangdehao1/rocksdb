@@ -182,7 +182,7 @@ uint8_t WriteThread::AwaitState(Writer* w, uint8_t goal_mask,
 
   if ((state & goal_mask) == 0) {
     TEST_SYNC_POINT_CALLBACK("WriteThread::AwaitState:BlockingWaiting", w);
-    state = BlockingAwaitState(w, goal_mask);
+    state = BlockingAwaitState(w, goal_mask); // ##
   }
 
   if (update_ctx) {
@@ -213,8 +213,8 @@ void WriteThread::SetState(Writer* w, uint8_t new_state) {
 
     std::lock_guard<std::mutex> guard(w->StateMutex());
     assert(w->state.load(std::memory_order_relaxed) != new_state);
-    w->state.store(new_state, std::memory_order_relaxed);
-    w->StateCV().notify_one();
+    w->state.store(new_state, std::memory_order_relaxed); // ##
+    w->StateCV().notify_one(); // ##
   }
 }
 
@@ -268,6 +268,7 @@ bool WriteThread::LinkGroup(WriteGroup& write_group,
     }
     w = w->link_older;
   }
+
   Writer* newest = newest_writer->load(std::memory_order_relaxed);
   while (true) {
     leader->link_older = newest;
@@ -361,6 +362,35 @@ void WriteThread::EndWriteStall() {
 }
 
 static WriteThread::AdaptationContext jbg_ctx("JoinBatchGroup");
+
+/*
+ *  JoinBatchGroup 
+ *     |
+ *     ----> direct-return  
+ *     |        | 
+ *     |        ----> leader
+ *     |
+ *     ----> block-then-return 
+ *               |
+ *               |
+ *               ---> general
+ *               |     | 
+ *               |     ---> leader   
+ *               |     |
+ *               |     ---> follower 
+ *               |            |
+ *               |            ----> (1) memtable have been done by leader
+ *               |            |
+ *               |            ----> (2) follower itself need to write memtable in parallel
+ *               ---> pipe-line 
+ *                      |
+ *                    follower
+ *                      |
+ *                      ---> (1) memtable_writer_group_leader
+ *                      |
+ *                      ---> (2) finish memtable writes in parallel telled by memtable_writer_group_leader
+ *
+ */
 void WriteThread::JoinBatchGroup(Writer* w) {
   TEST_SYNC_POINT_CALLBACK("WriteThread::JoinBatchGroup:Start", w);
   assert(w->batch != nullptr);
@@ -389,15 +419,14 @@ void WriteThread::JoinBatchGroup(Writer* w) {
      */
     TEST_SYNC_POINT_CALLBACK("WriteThread::JoinBatchGroup:BeganWaiting", w);
     AwaitState(w, STATE_GROUP_LEADER | STATE_MEMTABLE_WRITER_LEADER |
-                      STATE_PARALLEL_MEMTABLE_WRITER | STATE_COMPLETED,
-               &jbg_ctx);
+                      STATE_PARALLEL_MEMTABLE_WRITER | STATE_COMPLETED, &jbg_ctx); // ##
     TEST_SYNC_POINT_CALLBACK("WriteThread::JoinBatchGroup:DoneWaiting", w);
   }
 }
 
 size_t WriteThread::EnterAsBatchGroupLeader(Writer* leader,
                                             WriteGroup* write_group) {
-  assert(leader->link_older == nullptr);
+  assert(leader->link_older == nullptr); // #### 
   assert(leader->batch != nullptr);
   assert(write_group != nullptr);
 
@@ -464,6 +493,7 @@ size_t WriteThread::EnterAsBatchGroupLeader(Writer* leader,
       break;
     }
 
+    // dehao : add current newer writer into WriteGroup
     w->write_group = write_group;
     size += batch_size;
     write_group->last_writer = w;
@@ -531,8 +561,7 @@ void WriteThread::EnterAsMemTableWriter(Writer* leader,
       last_writer->sequence + WriteBatchInternal::Count(last_writer->batch) - 1;
 }
 
-void WriteThread::ExitAsMemTableWriter(Writer* /*self*/,
-                                       WriteGroup& write_group) {
+void WriteThread::ExitAsMemTableWriter(Writer* /*self*/, WriteGroup& write_group) {
   Writer* leader = write_group.leader;
   Writer* last_writer = write_group.last_writer;
 
@@ -603,6 +632,7 @@ void WriteThread::ExitAsBatchGroupFollower(Writer* w) {
 }
 
 static WriteThread::AdaptationContext eabgl_ctx("ExitAsBatchGroupLeader");
+
 void WriteThread::ExitAsBatchGroupLeader(WriteGroup& write_group,
                                          Status status) {
   Writer* leader = write_group.leader;
@@ -620,12 +650,12 @@ void WriteThread::ExitAsBatchGroupLeader(WriteGroup& write_group,
       Writer* next = w->link_older;
       w->status = status;
       if (!w->ShouldWriteToMemtable()) {
-        CompleteFollower(w, write_group);
+        CompleteFollower(w, write_group); // ##
       }
       w = next;
     }
     if (!leader->ShouldWriteToMemtable()) {
-      CompleteLeader(write_group);
+      CompleteLeader(write_group); // ##
     }
 
     Writer* next_leader = nullptr;
@@ -671,7 +701,7 @@ void WriteThread::ExitAsBatchGroupLeader(WriteGroup& write_group,
 
     if (next_leader != nullptr) {
       next_leader->link_older = nullptr;
-      SetState(next_leader, STATE_GROUP_LEADER);
+      SetState(next_leader, STATE_GROUP_LEADER); // ##
     }
     AwaitState(leader, STATE_MEMTABLE_WRITER_LEADER |
                            STATE_PARALLEL_MEMTABLE_WRITER | STATE_COMPLETED,
@@ -751,6 +781,7 @@ void WriteThread::ExitUnbatched(Writer* w) {
 }
 
 static WriteThread::AdaptationContext wfmw_ctx("WaitForMemTableWriters");
+
 void WriteThread::WaitForMemTableWriters() {
   assert(enable_pipelined_write_);
   if (newest_memtable_writer_.load() == nullptr) {
