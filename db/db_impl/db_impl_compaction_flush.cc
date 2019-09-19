@@ -145,6 +145,7 @@ Status DBImpl::FlushMemTableToOutputFile(
   assert(cfd->imm()->NumNotFlushed() != 0);
   assert(cfd->imm()->IsFlushPending());
 
+  // ## dehao : request--> flush_job
   FlushJob flush_job(
       dbname_, cfd, immutable_db_options_, mutable_cf_options,
       nullptr /* memtable_id */, env_options_for_compaction_, versions_.get(),
@@ -155,10 +156,12 @@ Status DBImpl::FlushMemTableToOutputFile(
       &event_logger_, mutable_cf_options.report_bg_io_stats,
       true /* sync_output_directory */, true /* write_manifest */, thread_pri);
 
+  // ## dehao : init FileMetaData
   FileMetaData file_meta;
 
   TEST_SYNC_POINT("DBImpl::FlushMemTableToOutputFile:BeforePickMemtables");
-  flush_job.PickMemTable();
+  // ## dehao : pick up memtable
+  flush_job.PickMemTable(); // ##
   TEST_SYNC_POINT("DBImpl::FlushMemTableToOutputFile:AfterPickMemtables");
 
 #ifndef ROCKSDB_LITE
@@ -193,6 +196,7 @@ Status DBImpl::FlushMemTableToOutputFile(
     flush_job.Cancel();
   }
 
+  // dehao : install 
   if (s.ok()) {
     InstallSuperVersionAndScheduleWork(cfd, superversion_context,
                                        mutable_cf_options);
@@ -242,6 +246,7 @@ Status DBImpl::FlushMemTablesToOutputFiles(
     return AtomicFlushMemTablesToOutputFiles(
         bg_flush_args, made_progress, job_context, log_buffer, thread_pri);
   }
+
   std::vector<SequenceNumber> snapshot_seqs;
   SequenceNumber earliest_write_conflict_snapshot;
   SnapshotChecker* snapshot_checker;
@@ -2129,6 +2134,7 @@ Status DBImpl::BackgroundFlush(bool* made_progress, JobContext* job_context,
 
   Status status;
   *reason = FlushReason::kOthers;
+
   // If BG work is stopped due to an error, but a recovery is in progress,
   // that means this flush is part of the recovery. So allow it to go through
   if (!error_handler_.IsBGWorkStopped()) {
@@ -2149,17 +2155,18 @@ Status DBImpl::BackgroundFlush(bool* made_progress, JobContext* job_context,
   autovector<ColumnFamilyData*> column_families_not_to_flush;
   while (!flush_queue_.empty()) {
     // This cfd is already referenced
-    const FlushRequest& flush_req = PopFirstFromFlushQueue();
+    const FlushRequest& flush_req = PopFirstFromFlushQueue(); // ##
     superversion_contexts.clear();
     superversion_contexts.reserve(flush_req.size());
 
     for (const auto& iter : flush_req) {
-      ColumnFamilyData* cfd = iter.first;
+      ColumnFamilyData* cfd = iter.first; // ##
       if (cfd->IsDropped() || !cfd->imm()->IsFlushPending()) {
         // can't flush this CF, try next one
         column_families_not_to_flush.push_back(cfd);
         continue;
       }
+      // dehao : enqueue
       superversion_contexts.emplace_back(SuperVersionContext(true));
       bg_flush_args.emplace_back(cfd, iter.second,
                                  &(superversion_contexts.back()));
@@ -2183,6 +2190,7 @@ Status DBImpl::BackgroundFlush(bool* made_progress, JobContext* job_context,
           bg_job_limits.max_compactions, bg_flush_scheduled_,
           bg_compaction_scheduled_);
     }
+    // dehao : flush memtable
     status = FlushMemTablesToOutputFiles(bg_flush_args, made_progress,
                                          job_context, log_buffer, thread_pri);
     TEST_SYNC_POINT("DBImpl::BackgroundFlush:BeforeFlush");

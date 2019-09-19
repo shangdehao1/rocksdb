@@ -16,8 +16,7 @@ namespace rocksdb {
 
 WriteThread::WriteThread(const ImmutableDBOptions& db_options)
     : max_yield_usec_(db_options.enable_write_thread_adaptive_yield
-                          ? db_options.write_thread_max_yield_usec
-                          : 0),
+                          ? db_options.write_thread_max_yield_usec : 0),
       slow_yield_usec_(db_options.write_thread_slow_yield_usec),
       allow_concurrent_memtable_write_(
           db_options.allow_concurrent_memtable_write),
@@ -209,7 +208,7 @@ void WriteThread::SetState(Writer* w, uint8_t new_state) {
   auto state = w->state.load(std::memory_order_acquire);
   if (state == STATE_LOCKED_WAITING ||
       !w->state.compare_exchange_strong(state, new_state)) {
-    assert(state == STATE_LOCKED_WAITING);
+    assert(state == STATE_LOCKED_WAITING); // ##
 
     std::lock_guard<std::mutex> guard(w->StateMutex());
     assert(w->state.load(std::memory_order_relaxed) != new_state);
@@ -238,13 +237,14 @@ bool WriteThread::LinkOne(Writer* w, std::atomic<Writer*>* newest_writer) {
         MutexLock lock(&stall_mu_);
         writers = newest_writer->load(std::memory_order_relaxed);
         if (writers == &write_stall_dummy_) {
-          stall_cv_.Wait();
+          stall_cv_.Wait(); // ##
           // Load newest_writers_ again since it may have changed
           writers = newest_writer->load(std::memory_order_relaxed);
           continue;
         }
       }
     }
+
     w->link_older = writers;
     if (newest_writer->compare_exchange_weak(writers, w)) {
       return (writers == nullptr);
@@ -258,6 +258,7 @@ bool WriteThread::LinkGroup(WriteGroup& write_group,
   Writer* leader = write_group.leader;
   Writer* last_writer = write_group.last_writer;
   Writer* w = last_writer;
+  // dehao : clear link_newer, and keep link_older
   while (true) {
     // Unset link_newer pointers to make sure when we call
     // CreateMissingNewerLinks later it create all missing links.
@@ -309,38 +310,37 @@ void WriteThread::CompleteLeader(WriteGroup& write_group) {
     write_group.last_writer = nullptr;
   } else {
     assert(leader->link_newer != nullptr);
-    leader->link_newer->link_older = nullptr;
-    write_group.leader = leader->link_newer;
+    leader->link_newer->link_older = nullptr; // ##
+    write_group.leader = leader->link_newer; // ##
   }
   write_group.size -= 1;
-  SetState(leader, STATE_COMPLETED);
+  SetState(leader, STATE_COMPLETED); // ##
 }
 
 void WriteThread::CompleteFollower(Writer* w, WriteGroup& write_group) {
-  assert(write_group.size > 1);
+  assert(write_group.size > 1); // dehao : leader must still are in link.
   assert(w != write_group.leader);
   if (w == write_group.last_writer) {
     w->link_older->link_newer = nullptr;
     write_group.last_writer = w->link_older;
   } else {
-    w->link_older->link_newer = w->link_newer;
-    w->link_newer->link_older = w->link_older;
+    w->link_older->link_newer = w->link_newer; // ##
+    w->link_newer->link_older = w->link_older; // ##
   }
   write_group.size -= 1;
-  SetState(w, STATE_COMPLETED);
+  SetState(w, STATE_COMPLETED); // ##
 }
 
 void WriteThread::BeginWriteStall() {
   LinkOne(&write_stall_dummy_, &newest_writer_);
 
   // Walk writer list until w->write_group != nullptr. The current write group
-  // will not have a mix of slowdown/no_slowdown, so its ok to stop at that
-  // point
+  // will not have a mix of slowdown/no_slowdown, so its ok to stop at that point
   Writer* w = write_stall_dummy_.link_older;
   Writer* prev = &write_stall_dummy_;
   while (w != nullptr && w->write_group == nullptr) {
     if (w->no_slowdown) {
-      prev->link_older = w->link_older;
+      prev->link_older = w->link_older; // dehao : directly remove this writer.
       w->status = Status::Incomplete("Write stall");
       SetState(w, STATE_COMPLETED);
       w = prev->link_older;
@@ -354,6 +354,7 @@ void WriteThread::BeginWriteStall() {
 void WriteThread::EndWriteStall() {
   MutexLock lock(&stall_mu_);
 
+  // dehao : if stall writes, the first node is write_stall_dummy_
   assert(newest_writer_.load(std::memory_order_relaxed) == &write_stall_dummy_);
   newest_writer_.exchange(write_stall_dummy_.link_older);
 
@@ -430,6 +431,7 @@ size_t WriteThread::EnterAsBatchGroupLeader(Writer* leader,
   assert(leader->batch != nullptr);
   assert(write_group != nullptr);
 
+  // dehao : leader's bytes.
   size_t size = WriteBatchInternal::ByteSize(leader->batch);
 
   // Allow the group to grow up to a maximum size, but if the
@@ -499,6 +501,7 @@ size_t WriteThread::EnterAsBatchGroupLeader(Writer* leader,
     write_group->last_writer = w;
     write_group->size++;
   }
+
   TEST_SYNC_POINT_CALLBACK("WriteThread::EnterAsBatchGroupLeader:End", w);
   return size;
 }
@@ -596,7 +599,7 @@ void WriteThread::LaunchParallelMemTableWriters(WriteGroup* write_group) {
   assert(write_group != nullptr);
   write_group->running.store(write_group->size);
   for (auto w : *write_group) {
-    SetState(w, STATE_PARALLEL_MEMTABLE_WRITER);
+    SetState(w, STATE_PARALLEL_MEMTABLE_WRITER); // ##
   }
 }
 
@@ -633,10 +636,11 @@ void WriteThread::ExitAsBatchGroupFollower(Writer* w) {
 
 static WriteThread::AdaptationContext eabgl_ctx("ExitAsBatchGroupLeader");
 
-void WriteThread::ExitAsBatchGroupLeader(WriteGroup& write_group,
-                                         Status status) {
+void WriteThread::ExitAsBatchGroupLeader(WriteGroup& write_group, Status status) {
   Writer* leader = write_group.leader;
   Writer* last_writer = write_group.last_writer;
+
+  // dehao : consistent check -- leader must be oldest.
   assert(leader->link_older == nullptr);
 
   // Propagate memtable write error to the whole group.
@@ -645,10 +649,13 @@ void WriteThread::ExitAsBatchGroupLeader(WriteGroup& write_group,
   }
 
   if (enable_pipelined_write_) {
+
+    // dehao : if any error, early end up all writer of group.
     // Notify writers don't write to memtable to exit.
     for (Writer* w = last_writer; w != leader;) {
       Writer* next = w->link_older;
-      w->status = status;
+      w->status = status; // dehao : status from writing wal.
+      // dehao : if any other error, early end up this writer.
       if (!w->ShouldWriteToMemtable()) {
         CompleteFollower(w, write_group); // ##
       }
@@ -681,7 +688,7 @@ void WriteThread::ExitAsBatchGroupLeader(WriteGroup& write_group,
     if (write_group.size > 0) {
       if (LinkGroup(write_group, &newest_memtable_writer_)) {
         // The leader can now be different from current writer.
-        SetState(write_group.leader, STATE_MEMTABLE_WRITER_LEADER);
+        SetState(write_group.leader, STATE_MEMTABLE_WRITER_LEADER); // ##
       }
     }
 
@@ -700,13 +707,15 @@ void WriteThread::ExitAsBatchGroupLeader(WriteGroup& write_group,
     }
 
     if (next_leader != nullptr) {
-      next_leader->link_older = nullptr;
-      SetState(next_leader, STATE_GROUP_LEADER); // ##
+      next_leader->link_older = nullptr; // dehao : remove old writers from queue.
+      SetState(next_leader, STATE_GROUP_LEADER); // dehao : wake up  
     }
     AwaitState(leader, STATE_MEMTABLE_WRITER_LEADER |
                            STATE_PARALLEL_MEMTABLE_WRITER | STATE_COMPLETED,
                &eabgl_ctx);
-  } else {
+  } 
+  else 
+  {
     Writer* head = newest_writer_.load(std::memory_order_acquire);
     if (head != last_writer ||
         !newest_writer_.compare_exchange_strong(head, nullptr)) {
@@ -727,6 +736,8 @@ void WriteThread::ExitAsBatchGroupLeader(WriteGroup& write_group,
       // to MarkJoined, so we can definitely conclude that no other leader
       // work is going on here (with or without db mutex).
       CreateMissingNewerLinks(head);
+
+      // dehao : remove all writer belong to write_group
       assert(last_writer->link_newer->link_older == last_writer);
       last_writer->link_newer->link_older = nullptr;
 
@@ -753,6 +764,7 @@ void WriteThread::ExitAsBatchGroupLeader(WriteGroup& write_group,
 }
 
 static WriteThread::AdaptationContext eu_ctx("EnterUnbatched");
+
 void WriteThread::EnterUnbatched(Writer* w, InstrumentedMutex* mu) {
   assert(w != nullptr && w->batch == nullptr);
   mu->Unlock();

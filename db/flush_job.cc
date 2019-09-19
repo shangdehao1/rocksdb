@@ -223,7 +223,7 @@ Status FlushJob::Run(LogsWithPrepTracker* prep_tracker,
   }
 
   // This will release and re-acquire the mutex.
-  Status s = WriteLevel0Table();
+  Status s = WriteLevel0Table(); // ##
 
   if (s.ok() && cfd_->IsDropped()) {
     s = Status::ColumnFamilyDropped("Column family dropped during compaction");
