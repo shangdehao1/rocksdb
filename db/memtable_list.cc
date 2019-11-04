@@ -86,6 +86,8 @@ void MemTableListVersion::Unref(autovector<MemTable*>* to_delete) {
   }
 }
 
+// =========
+
 int MemTableList::NumNotFlushed() const {
   int size = static_cast<int>(current_->memlist_.size());
   assert(num_flush_not_started_ <= size);
@@ -286,6 +288,8 @@ void MemTableList::PickMemtablesToFlush(const uint64_t* max_memtable_id,
                                         autovector<MemTable*>* ret) {
   AutoThreadOperationStageUpdater stage_updater(
       ThreadStatus::STAGE_PICK_MEMTABLES_TO_FLUSH);
+
+  // dehao : immutable still exist in memlist_ after this function call.
   const auto& memlist = current_->memlist_;
   bool atomic_flush = false;
   for (auto it = memlist.rbegin(); it != memlist.rend(); ++it) {
@@ -306,6 +310,7 @@ void MemTableList::PickMemtablesToFlush(const uint64_t* max_memtable_id,
       ret->push_back(m);
     }
   }
+
   if (!atomic_flush || num_flush_not_started_ == 0) {
     flush_requested_ = false;  // start-flush request is complete
   }
@@ -394,8 +399,8 @@ Status MemTableList::TryInstallMemtableFlushResults(
         ROCKS_LOG_BUFFER(log_buffer,
                          "[%s] Level-0 commit table #%" PRIu64 " started",
                          cfd->GetName().c_str(), m->file_number_);
-        edit_list.push_back(&m->edit_);
-        memtables_to_flush.push_back(m);
+        edit_list.push_back(&m->edit_); // ## <<===
+        memtables_to_flush.push_back(m); // ## <<==
       }
       batch_count++;
     }
@@ -412,7 +417,7 @@ Status MemTableList::TryInstallMemtableFlushResults(
 
       // this can release and reacquire the mutex.
       s = vset->LogAndApply(cfd, mutable_cf_options, edit_list, mu,
-                            db_directory);
+                            db_directory); // ## <<<<======
 
       // we will be changing the version in the next code path,
       // so we better create a new one, since versions are immutable
@@ -443,7 +448,7 @@ Status MemTableList::TryInstallMemtableFlushResults(
                                        ": memtable #%" PRIu64 " done",
                            cfd->GetName().c_str(), m->file_number_, mem_id);
           assert(m->file_number_ > 0);
-          current_->Remove(m, to_delete);
+          current_->Remove(m, to_delete); // ### <<<=====
           ++mem_id;
         }
       } else {

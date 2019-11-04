@@ -27,20 +27,22 @@ struct SuperVersionContext {
   };
 
   autovector<SuperVersion*> superversions_to_free;
-#ifndef ROCKSDB_DISABLE_STALL_NOTIFICATION
+
+  #ifndef ROCKSDB_DISABLE_STALL_NOTIFICATION
   autovector<WriteStallNotification> write_stall_notifications;
-#endif
-  std::unique_ptr<SuperVersion>
-      new_superversion;  // if nullptr no new superversion
+  #endif
+
+  // if nullptr no new superversion
+  std::unique_ptr<SuperVersion> new_superversion;
 
   explicit SuperVersionContext(bool create_superversion = false)
     : new_superversion(create_superversion ? new SuperVersion() : nullptr) {}
 
   explicit SuperVersionContext(SuperVersionContext&& other)
       : superversions_to_free(std::move(other.superversions_to_free)),
-#ifndef ROCKSDB_DISABLE_STALL_NOTIFICATION
+        #ifndef ROCKSDB_DISABLE_STALL_NOTIFICATION
         write_stall_notifications(std::move(other.write_stall_notifications)),
-#endif
+        #endif
         new_superversion(std::move(other.new_superversion)) {
   }
 
@@ -49,34 +51,34 @@ struct SuperVersionContext {
   }
 
   inline bool HaveSomethingToDelete() const {
-#ifndef ROCKSDB_DISABLE_STALL_NOTIFICATION
+    #ifndef ROCKSDB_DISABLE_STALL_NOTIFICATION
     return !superversions_to_free.empty() ||
            !write_stall_notifications.empty();
-#else
+    #else
     return !superversions_to_free.empty();
-#endif
+    #endif
   }
 
   void PushWriteStallNotification(
       WriteStallCondition old_cond, WriteStallCondition new_cond,
       const std::string& name, const ImmutableCFOptions* ioptions) {
-#if !defined(ROCKSDB_LITE) && !defined(ROCKSDB_DISABLE_STALL_NOTIFICATION)
+    #if !defined(ROCKSDB_LITE) && !defined(ROCKSDB_DISABLE_STALL_NOTIFICATION)
     WriteStallNotification notif;
     notif.write_stall_info.cf_name = name;
     notif.write_stall_info.condition.prev = old_cond;
     notif.write_stall_info.condition.cur = new_cond;
     notif.immutable_cf_options = ioptions;
     write_stall_notifications.push_back(notif);
-#else
+    #else
     (void)old_cond;
     (void)new_cond;
     (void)name;
     (void)ioptions;
-#endif  // !defined(ROCKSDB_LITE) && !defined(ROCKSDB_DISABLE_STALL_NOTIFICATION)
+    #endif  // !defined(ROCKSDB_LITE) && !defined(ROCKSDB_DISABLE_STALL_NOTIFICATION)
   }
 
   void Clean() {
-#if !defined(ROCKSDB_LITE) && !defined(ROCKSDB_DISABLE_STALL_NOTIFICATION)
+    #if !defined(ROCKSDB_LITE) && !defined(ROCKSDB_DISABLE_STALL_NOTIFICATION)
     // notify listeners on changed write stall conditions
     for (auto& notif : write_stall_notifications) {
       for (auto& listener : notif.immutable_cf_options->listeners) {
@@ -84,7 +86,7 @@ struct SuperVersionContext {
       }
     }
     write_stall_notifications.clear();
-#endif  // !ROCKSDB_LITE
+    #endif  // !ROCKSDB_LITE
     // free superversions
     for (auto s : superversions_to_free) {
       delete s;
@@ -93,9 +95,9 @@ struct SuperVersionContext {
   }
 
   ~SuperVersionContext() {
-#ifndef ROCKSDB_DISABLE_STALL_NOTIFICATION
+    #ifndef ROCKSDB_DISABLE_STALL_NOTIFICATION
     assert(write_stall_notifications.empty());
-#endif
+    #endif
     assert(superversions_to_free.empty());
   }
 };

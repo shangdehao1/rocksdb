@@ -401,6 +401,8 @@ void SuperVersionUnrefHandle(void* ptr) {
 }
 }  // anonymous namespace
 
+// ========================
+
 ColumnFamilyData::ColumnFamilyData(
     uint32_t id, const std::string& name, Version* _dummy_versions,
     Cache* _table_cache, WriteBufferManager* write_buffer_manager,
@@ -449,13 +451,16 @@ ColumnFamilyData::ColumnFamilyData(
     table_cache_.reset(new TableCache(ioptions_, env_options, _table_cache,
                                       block_cache_tracer));
     if (ioptions_.compaction_style == kCompactionStyleLevel) {
+      // dehao : classic compaction
       compaction_picker_.reset(
           new LevelCompactionPicker(ioptions_, &internal_comparator_));
-#ifndef ROCKSDB_LITE
+      #ifndef ROCKSDB_LITE
     } else if (ioptions_.compaction_style == kCompactionStyleUniversal) {
+      // dehao : universal compaction
       compaction_picker_.reset(
-          new UniversalCompactionPicker(ioptions_, &internal_comparator_));
+          new UniversalCompactionPicker(ioptions_, &internal_comparator_)); // ##
     } else if (ioptions_.compaction_style == kCompactionStyleFIFO) {
+      // dehao : FIFO compaction
       compaction_picker_.reset(
           new FIFOCompactionPicker(ioptions_, &internal_comparator_));
     } else if (ioptions_.compaction_style == kCompactionStyleNone) {
@@ -465,7 +470,7 @@ ColumnFamilyData::ColumnFamilyData(
                      "Column family %s does not use any background compaction. "
                      "Compactions can only be done via CompactFiles\n",
                      GetName().c_str());
-#endif  // !ROCKSDB_LITE
+      #endif  // !ROCKSDB_LITE
     } else {
       ROCKS_LOG_ERROR(ioptions_.info_log,
                       "Unable to recognize the specified compaction style %d. "
@@ -548,12 +553,13 @@ ColumnFamilyData::~ColumnFamilyData() {
 
 void ColumnFamilyData::SetDropped() {
   // can't drop default CF
-  assert(id_ != 0);
-  dropped_ = true;
+  assert(id_ != 0); // ##
+  // dehao : set dropped
+  dropped_ = true;  // ##
   write_controller_token_.reset();
 
   // remove from column_family_set
-  column_family_set_->RemoveColumnFamily(this);
+  column_family_set_->RemoveColumnFamily(this); // ##
 }
 
 ColumnFamilyOptions ColumnFamilyData::GetLatestCFOptions() const {
@@ -689,26 +695,32 @@ ColumnFamilyData::GetWriteStallConditionAndCause(
     int num_unflushed_memtables, int num_l0_files,
     uint64_t num_compaction_needed_bytes,
     const MutableCFOptions& mutable_cf_options) {
+  // dehao : memtable number
   if (num_unflushed_memtables >= mutable_cf_options.max_write_buffer_number) {
     return {WriteStallCondition::kStopped, WriteStallCause::kMemtableLimit};
+  // dehao : level-0 file number
   } else if (!mutable_cf_options.disable_auto_compactions &&
              num_l0_files >= mutable_cf_options.level0_stop_writes_trigger) {
     return {WriteStallCondition::kStopped, WriteStallCause::kL0FileCountLimit};
+  // dehao : too many pending compaction data.
   } else if (!mutable_cf_options.disable_auto_compactions &&
              mutable_cf_options.hard_pending_compaction_bytes_limit > 0 &&
              num_compaction_needed_bytes >=
                  mutable_cf_options.hard_pending_compaction_bytes_limit) {
     return {WriteStallCondition::kStopped,
             WriteStallCause::kPendingCompactionBytes};
+  // dehao : slow down writes due to memtable number.
   } else if (mutable_cf_options.max_write_buffer_number > 3 &&
              num_unflushed_memtables >=
                  mutable_cf_options.max_write_buffer_number - 1) {
     return {WriteStallCondition::kDelayed, WriteStallCause::kMemtableLimit};
+  // dehao : slow down writes due to level-0 file number
   } else if (!mutable_cf_options.disable_auto_compactions &&
              mutable_cf_options.level0_slowdown_writes_trigger >= 0 &&
              num_l0_files >=
                  mutable_cf_options.level0_slowdown_writes_trigger) {
     return {WriteStallCondition::kDelayed, WriteStallCause::kL0FileCountLimit};
+  // dehao : slow down writes due to pending compaction data.
   } else if (!mutable_cf_options.disable_auto_compactions &&
              mutable_cf_options.soft_pending_compaction_bytes_limit > 0 &&
              num_compaction_needed_bytes >=
@@ -716,6 +728,8 @@ ColumnFamilyData::GetWriteStallConditionAndCause(
     return {WriteStallCondition::kDelayed,
             WriteStallCause::kPendingCompactionBytes};
   }
+
+  // dehao : everything is ok.
   return {WriteStallCondition::kNormal, WriteStallCause::kNone};
 }
 
@@ -889,14 +903,17 @@ void ColumnFamilyData::SetCurrent(Version* current_version) {
 }
 
 uint64_t ColumnFamilyData::GetNumLiveVersions() const {
-  return VersionSet::GetNumLiveVersions(dummy_versions_);
+  // dehao : live version number for current column family.
+  return VersionSet::GetNumLiveVersions(dummy_versions_); // ##
 }
 
 uint64_t ColumnFamilyData::GetTotalSstFilesSize() const {
-  return VersionSet::GetTotalSstFilesSize(dummy_versions_);
+  // dehao : (active sst file number) + (obsolete file number)
+  return VersionSet::GetTotalSstFilesSize(dummy_versions_); // ##
 }
 
 uint64_t ColumnFamilyData::GetLiveSstFilesSize() const {
+  // dehao : active sst file number.
   return current_->GetSstFilesSize();
 }
 
@@ -916,6 +933,8 @@ void ColumnFamilyData::CreateNewMemtable(
 }
 
 bool ColumnFamilyData::NeedsCompaction() const {
+  // dehao : for example compaction_picker_level.cc file.
+  // ****************************************************
   return compaction_picker_->NeedsCompaction(current_->storage_info());
 }
 
@@ -1093,16 +1112,20 @@ void ColumnFamilyData::InstallSuperVersion(
 void ColumnFamilyData::InstallSuperVersion(
     SuperVersionContext* sv_context, InstrumentedMutex* db_mutex,
     const MutableCFOptions& mutable_cf_options) {
+  // dehao : 
   SuperVersion* new_superversion = sv_context->new_superversion.release();
   new_superversion->db_mutex = db_mutex;
   new_superversion->mutable_cf_options = mutable_cf_options;
   new_superversion->Init(mem_, imm_.current(), current_);
+
+  // dehao : replace supper_version with new.
   SuperVersion* old_superversion = super_version_;
-  super_version_ = new_superversion;
-  ++super_version_number_;
+  super_version_ = new_superversion; // ### <<====
+  ++super_version_number_; // ## <<<====
   super_version_->version_number = super_version_number_;
+
   super_version_->write_stall_condition =
-      RecalculateWriteStallConditions(mutable_cf_options);
+      RecalculateWriteStallConditions(mutable_cf_options); // ##
 
   if (old_superversion != nullptr) {
     // Reset SuperVersions cached in thread local storage.
@@ -1251,6 +1274,8 @@ Directory* ColumnFamilyData::GetDataDir(size_t path_id) const {
   return data_dirs_[path_id].get();
 }
 
+// ================================
+
 ColumnFamilySet::ColumnFamilySet(const std::string& dbname,
                                  const ImmutableDBOptions* db_options,
                                  const EnvOptions& env_options,
@@ -1258,7 +1283,7 @@ ColumnFamilySet::ColumnFamilySet(const std::string& dbname,
                                  WriteBufferManager* write_buffer_manager,
                                  WriteController* write_controller,
                                  BlockCacheTracer* const block_cache_tracer)
-    : max_column_family_(0),
+    : max_column_family_(0), // ## no ColumnFamilyData
       dummy_cfd_(new ColumnFamilyData(
           0, "", nullptr, nullptr, nullptr, ColumnFamilyOptions(), *db_options,
           env_options, nullptr, block_cache_tracer)),
@@ -1348,7 +1373,7 @@ ColumnFamilyData* ColumnFamilySet::CreateColumnFamily(
   prev->next_ = new_cfd;
   dummy_cfd_->prev_ = new_cfd;
   if (id == 0) {
-    default_cfd_cache_ = new_cfd;
+    default_cfd_cache_ = new_cfd; // ##
   }
   return new_cfd;
 }
@@ -1357,6 +1382,7 @@ ColumnFamilyData* ColumnFamilySet::CreateColumnFamily(
 void ColumnFamilySet::FreeDeadColumnFamilies() {
   autovector<ColumnFamilyData*> to_delete;
   for (auto cfd = dummy_cfd_->next_; cfd != dummy_cfd_; cfd = cfd->next_) {
+    // dehao : if the number of reference of cfd is 0, delete it. 
     if (cfd->refs_.load(std::memory_order_relaxed) == 0) {
       to_delete.push_back(cfd);
     }
@@ -1374,6 +1400,8 @@ void ColumnFamilySet::RemoveColumnFamily(ColumnFamilyData* cfd) {
   column_family_data_.erase(cfd_iter);
   column_families_.erase(cfd->GetName());
 }
+
+// ============================
 
 // under a DB mutex OR from a write thread
 bool ColumnFamilyMemTablesImpl::Seek(uint32_t column_family_id) {

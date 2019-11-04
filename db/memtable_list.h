@@ -153,7 +153,7 @@ class MemTableListVersion {
   void UnrefMemTable(autovector<MemTable*>* to_delete, MemTable* m);
 
   // Immutable MemTables that have not yet been flushed.
-  std::list<MemTable*> memlist_;
+  std::list<MemTable*> memlist_; // ## <<<<<===
 
   // MemTables that have already been flushed
   // (used during Transaction validation)
@@ -324,7 +324,7 @@ class MemTableList {
 
   const int min_write_buffer_number_to_merge_;
 
-  MemTableListVersion* current_;
+  MemTableListVersion* current_; // #### <<<======
 
   // the number of elements that still need flushing
   int num_flush_not_started_;

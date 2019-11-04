@@ -79,6 +79,7 @@ class FlushJob {
   Status Run(LogsWithPrepTracker* prep_tracker = nullptr,
              FileMetaData* file_meta = nullptr);
   void Cancel();
+
   TableProperties GetTableProperties() const { return table_properties_; }
   const autovector<MemTable*>& GetMemTables() const { return mems_; }
 
@@ -86,10 +87,13 @@ class FlushJob {
   void ReportStartedFlush();
   void ReportFlushInputSize(const autovector<MemTable*>& mems);
   void RecordFlushIOStats();
-  Status WriteLevel0Table();
+
+  Status WriteLevel0Table(); // ## <<<<======
+
+  // ==============================================
 
   const std::string& dbname_;
-  ColumnFamilyData* cfd_;
+  ColumnFamilyData* cfd_; // ## <<<<======
   const ImmutableDBOptions& db_options_;
   const MutableCFOptions& mutable_cf_options_;
   // Pointer to a variable storing the largest memtable id to flush in this
@@ -97,16 +101,16 @@ class FlushJob {
   // this job. All memtables in this column family with an ID smaller than or
   // equal to *max_memtable_id_ will be selected for flush. If null, then all
   // memtables in the column family will be selected.
-  const uint64_t* max_memtable_id_;
+  const uint64_t* max_memtable_id_; // ## <<<<<======
   const EnvOptions env_options_;
-  VersionSet* versions_;
+  VersionSet* versions_; // ## <<<<======
   InstrumentedMutex* db_mutex_;
   std::atomic<bool>* shutting_down_;
   std::vector<SequenceNumber> existing_snapshots_;
   SequenceNumber earliest_write_conflict_snapshot_;
   SnapshotChecker* snapshot_checker_;
-  JobContext* job_context_;
-  LogBuffer* log_buffer_;
+  JobContext* job_context_; // ## <<<=====
+  LogBuffer* log_buffer_; // ## <<<===
   Directory* db_directory_;
   Directory* output_file_directory_;
   CompressionType output_compression_;
@@ -130,14 +134,14 @@ class FlushJob {
   // immediately after it finishes the flush if it is part of an atomic flush.
   // In this case, only after all flush jobs succeed in flush can RocksDB
   // commit to the MANIFEST.
-  const bool write_manifest_;
+  const bool write_manifest_; // ### <<<<<======
 
   // Variables below are set by PickMemTable():
-  FileMetaData meta_;
-  autovector<MemTable*> mems_; // ## dehao : 
-  VersionEdit* edit_;
-  Version* base_;
-  bool pick_memtable_called;
+  FileMetaData meta_; // ##  <<<<======
+  autovector<MemTable*> mems_; // ## <<<<====
+  VersionEdit* edit_; // ## <<<<====
+  Version* base_; // ## <<<<====
+  bool pick_memtable_called; // ## ture if we have called PickMemtable()
   Env::Priority thread_pri_;
 };
 

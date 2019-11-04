@@ -198,12 +198,15 @@ class ColumnFamilyHandleInternal : public ColumnFamilyHandleImpl {
 struct SuperVersion {
   // Accessing members of this class is not thread-safe and requires external
   // synchronization (ie db mutex held or on write thread).
-  MemTable* mem;
-  MemTableListVersion* imm;
-  Version* current;
+  MemTable* mem; // ## <<====
+  MemTableListVersion* imm; // ## <<<=====
+  Version* current; // ## <<<====
+
   MutableCFOptions mutable_cf_options;
+
   // Version number of the current SuperVersion
-  uint64_t version_number;
+  uint64_t version_number; // ## <<<<=======
+
   WriteStallCondition write_stall_condition;
 
   InstrumentedMutex* db_mutex;
@@ -238,7 +241,7 @@ struct SuperVersion {
   // We need to_delete because during Cleanup(), imm->Unref() returns
   // all memtables that we need to free through this vector. We then
   // delete all those memtables outside of mutex, during destruction
-  autovector<MemTable*> to_delete;
+  autovector<MemTable*> to_delete; // <<<<<=======
 };
 
 extern Status CheckCompressionSupported(const ColumnFamilyOptions& cf_options);
@@ -342,12 +345,12 @@ class ColumnFamilyData {
   // Validate CF options against DB options
   static Status ValidateOptions(const DBOptions& db_options,
                                 const ColumnFamilyOptions& cf_options);
-#ifndef ROCKSDB_LITE
+  #ifndef ROCKSDB_LITE
   // REQUIRES: DB mutex held
   Status SetOptions(
       const DBOptions& db_options,
       const std::unordered_map<std::string, std::string>& options_map);
-#endif  // ROCKSDB_LITE
+  #endif  // ROCKSDB_LITE
 
   InternalStats* internal_stats() { return internal_stats_.get(); }
 
@@ -359,6 +362,7 @@ class ColumnFamilyData {
   uint64_t GetNumLiveVersions() const;  // REQUIRE: DB mutex held
   uint64_t GetTotalSstFilesSize() const;  // REQUIRE: DB mutex held
   uint64_t GetLiveSstFilesSize() const;   // REQUIRE: DB mutex held
+
   void SetMemtable(MemTable* new_mem) {
     uint64_t memtable_id = last_memtable_id_.fetch_add(1) + 1;
     new_mem->SetID(memtable_id);
@@ -522,7 +526,7 @@ class ColumnFamilyData {
       int_tbl_prop_collector_factories_;
 
   const ColumnFamilyOptions initial_cf_options_;
-  const ImmutableCFOptions ioptions_;
+  const ImmutableCFOptions ioptions_; // ##
   MutableCFOptions mutable_cf_options_;
 
   const bool is_delete_range_supported_;
@@ -533,9 +537,9 @@ class ColumnFamilyData {
 
   WriteBufferManager* write_buffer_manager_;
 
-  MemTable* mem_;
-  MemTableList imm_;
-  SuperVersion* super_version_;
+  MemTable* mem_; // ## <<<====
+  MemTableList imm_;  // ## <<<<========
+  SuperVersion* super_version_; // ## <<<<====
 
   // An ordinal representing the current SuperVersion. Updated by
   // InstallSuperVersion(), i.e. incremented every time super_version_
@@ -561,10 +565,13 @@ class ColumnFamilyData {
 
   // An object that keeps all the compaction stats
   // and picks the next compaction
-  std::unique_ptr<CompactionPicker> compaction_picker_;
+  // dehao : can determine whether need to compaction.
+  // dehao : can get new compaction object which will execute compaction works.
+  std::unique_ptr<CompactionPicker> compaction_picker_; // #### <<<<====
 
   ColumnFamilySet* column_family_set_;
 
+  // dehao : WriteController will distribute some thing to it.
   std::unique_ptr<WriteControllerToken> write_controller_token_;
 
   // If true --> this ColumnFamily is currently present in DBImpl::flush_queue_
@@ -651,6 +658,7 @@ class ColumnFamilySet {
   void UpdateMaxColumnFamily(uint32_t new_max_column_family);
   size_t NumberOfColumnFamilies() const;
 
+  // dehao : this method also be responsible for creating defalut CFD.
   ColumnFamilyData* CreateColumnFamily(const std::string& name, uint32_t id,
                                        Version* dummy_version,
                                        const ColumnFamilyOptions& options);
@@ -681,19 +689,19 @@ class ColumnFamilySet {
   std::unordered_map<uint32_t, ColumnFamilyData*> column_family_data_;
 
   uint32_t max_column_family_;
-  ColumnFamilyData* dummy_cfd_;
+  ColumnFamilyData* dummy_cfd_; // ##
   // We don't hold the refcount here, since default column family always exists
   // We are also not responsible for cleaning up default_cfd_cache_. This is
   // just a cache that makes common case (accessing default column family)
   // faster
-  ColumnFamilyData* default_cfd_cache_;
+  ColumnFamilyData* default_cfd_cache_; // ##
 
   const std::string db_name_;
   const ImmutableDBOptions* const db_options_;
   const EnvOptions env_options_;
   Cache* table_cache_;
-  WriteBufferManager* write_buffer_manager_;
-  WriteController* write_controller_;
+  WriteBufferManager* write_buffer_manager_; // ##
+  WriteController* write_controller_; // ##
   BlockCacheTracer* const block_cache_tracer_;
 };
 

@@ -86,6 +86,7 @@ Status BuildTable(
   assert((column_family_id ==
           TablePropertiesCollectorFactory::Context::kUnknownColumnFamily) ==
          column_family_name.empty());
+
   // Reports the IOStats for flush for every following bytes.
   const size_t kReportFlushIOStatsEvery = 1048576;
   Status s;
@@ -99,10 +100,11 @@ Status BuildTable(
 
   std::string fname = TableFileName(ioptions.cf_paths, meta->fd.GetNumber(),
                                     meta->fd.GetPathId());
-#ifndef ROCKSDB_LITE
+  #ifndef ROCKSDB_LITE
   EventHelpers::NotifyTableFileCreationStarted(
       ioptions.listeners, dbname, column_family_name, fname, job_id, reason);
-#endif  // !ROCKSDB_LITE
+  #endif  // !ROCKSDB_LITE
+
   TableProperties tp;
 
   if (iter->Valid() || !range_del_agg->IsEmpty()) {
@@ -114,11 +116,12 @@ Status BuildTable(
     compression_opts_for_flush.max_dict_bytes = 0;
     compression_opts_for_flush.zstd_max_train_bytes = 0;
     {
+      // dehao : create WritableFile.
       std::unique_ptr<WritableFile> file;
-#ifndef NDEBUG
+      #ifndef NDEBUG
       bool use_direct_writes = env_options.use_direct_writes;
       TEST_SYNC_POINT_CALLBACK("BuildTable:create_file", &use_direct_writes);
-#endif  // !NDEBUG
+      #endif  // !NDEBUG
       s = NewWritableFile(env, fname, &file, env_options);
       if (!s.ok()) {
         EventHelpers::LogAndNotifyTableFileCreationFinished(
@@ -129,9 +132,13 @@ Status BuildTable(
       file->SetIOPriority(io_priority);
       file->SetWriteLifeTimeHint(write_hint);
 
+      // dehao : create WritableFileWriter
       file_writer.reset(
           new WritableFileWriter(std::move(file), fname, env_options, env,
                                  ioptions.statistics, ioptions.listeners));
+
+      // dehao : create builder which will receive all k-v data.
+      // dehao : receive WritableFileWriter object
       builder = NewTableBuilder(
           ioptions, mutable_cf_options, internal_comparator,
           int_tbl_prop_collector_factories, column_family_id,
@@ -141,22 +148,26 @@ Status BuildTable(
           0 /*target_file_size*/, file_creation_time);
     }
 
+    // dehao : helper object
     MergeHelper merge(env, internal_comparator.user_comparator(),
                       ioptions.merge_operator, nullptr, ioptions.info_log,
                       true /* internal key corruption is not ok */,
                       snapshots.empty() ? 0 : snapshots.back(),
                       snapshot_checker);
 
+    // dehao : this iterator can traversal all k-v data.
+    // dehao : receive merge object as parameter...
     CompactionIterator c_iter(
         iter, internal_comparator.user_comparator(), &merge, kMaxSequenceNumber,
         &snapshots, earliest_write_conflict_snapshot, snapshot_checker, env,
         ShouldReportDetailedTime(env, ioptions.statistics),
         true /* internal key corruption is not ok */, range_del_agg.get());
+
     c_iter.SeekToFirst();
     for (; c_iter.Valid(); c_iter.Next()) {
       const Slice& key = c_iter.key();
       const Slice& value = c_iter.value();
-      builder->Add(key, value);
+      builder->Add(key, value); // ## <<<<=======
       meta->UpdateBoundaries(key, c_iter.ikey().sequence);
 
       // TODO(noetzli): Update stats after flush, too.
@@ -172,7 +183,7 @@ Status BuildTable(
          range_del_it->Next()) {
       auto tombstone = range_del_it->Tombstone();
       auto kv = tombstone.Serialize();
-      builder->Add(kv.first.Encode(), kv.second);
+      builder->Add(kv.first.Encode(), kv.second); // ## <<<<======
       meta->UpdateBoundariesForRange(kv.first, tombstone.SerializeEndKey(),
                                      tombstone.seq_, internal_comparator);
     }
@@ -184,9 +195,10 @@ Status BuildTable(
     if (!s.ok() || empty) {
       builder->Abandon();
     } else {
-      s = builder->Finish();
+      s = builder->Finish(); // #####
     }
 
+    // dehao : update FileMeta, then delete builder.
     if (s.ok() && !empty) {
       uint64_t file_size = builder->FileSize();
       meta->fd.file_size = file_size;
@@ -202,10 +214,10 @@ Status BuildTable(
     // Finish and check for file errors
     if (s.ok() && !empty) {
       StopWatch sw(env, ioptions.statistics, TABLE_SYNC_MICROS);
-      s = file_writer->Sync(ioptions.use_fsync);
+      s = file_writer->Sync(ioptions.use_fsync); // ## 
     }
     if (s.ok() && !empty) {
-      s = file_writer->Close();
+      s = file_writer->Close(); // ##
     }
 
     if (s.ok() && !empty) {
@@ -239,7 +251,7 @@ Status BuildTable(
   }
 
   if (!s.ok() || meta->fd.GetFileSize() == 0) {
-    env->DeleteFile(fname);
+    env->DeleteFile(fname); // ##
   }
 
   // Output to event logger and fire events.

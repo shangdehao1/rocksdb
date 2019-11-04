@@ -662,8 +662,7 @@ Status DBImpl::UnorderedWriteMemtable(const WriteOptions& write_options,
   PERF_TIMER_GUARD(write_pre_and_post_process_time);
   StopWatch write_sw(env_, immutable_db_options_.statistics.get(), DB_WRITE);
 
-  WriteThread::Writer w(write_options, my_batch, callback, log_ref,
-                        false /*disable_memtable*/);
+  WriteThread::Writer w(write_options, my_batch, callback, log_ref, false);
 
   if (w.CheckCallback(this) && w.ShouldWriteToMemtable()) {
     w.sequence = seq;
@@ -672,8 +671,11 @@ Status DBImpl::UnorderedWriteMemtable(const WriteOptions& write_options,
     stats->AddDBStats(InternalStats::NUMBER_KEYS_WRITTEN, total_count);
     RecordTick(stats_, NUMBER_KEYS_WRITTEN, total_count);
 
+    // 
     ColumnFamilyMemTablesImpl column_family_memtables(
         versions_->GetColumnFamilySet());
+
+    // dehao : 
     w.status = WriteBatchInternal::InsertInto(
         &w, w.sequence, &column_family_memtables, &flush_scheduler_,
         write_options.ignore_missing_column_families, 0 /*log_number*/, this,
@@ -920,12 +922,14 @@ Status DBImpl::PreprocessWrite(const WriteOptions& write_options,
   assert(!single_column_family_mode_ ||
          versions_->GetColumnFamilySet()->NumberOfColumnFamilies() == 1);
 
+  // dehao : check wal size...
   if (UNLIKELY(status.ok() && !single_column_family_mode_ &&
                total_log_size_ > GetMaxTotalWalSize())) {
     WaitForPendingWrites();
     status = SwitchWAL(write_context); // ## 
   }
 
+  // dehao : write_buffer_manager will manage memory usage...
   if (UNLIKELY(status.ok() && write_buffer_manager_->ShouldFlush())) {
     // Before a new memtable is added in SwitchMemtable(),
     // write_buffer_manager_->ShouldFlush() will keep returning true. If another
@@ -944,6 +948,7 @@ Status DBImpl::PreprocessWrite(const WriteOptions& write_options,
   PERF_TIMER_STOP(write_scheduling_flushes_compactions_time);
   PERF_TIMER_GUARD(write_pre_and_post_process_time);
 
+  // dehao : check if need to delay current write...
   if (UNLIKELY(status.ok() && (write_controller_.IsStopped() ||
                                write_controller_.NeedsDelay()))) {
     PERF_TIMER_STOP(write_pre_and_post_process_time);
@@ -1360,23 +1365,28 @@ Status DBImpl::HandleWriteBufferFull(WriteContext* write_context) {
       "using %" ROCKSDB_PRIszt " bytes out of a total of %" ROCKSDB_PRIszt ".",
       write_buffer_manager_->memory_usage(),
       write_buffer_manager_->buffer_size());
+
   // no need to refcount because drop is happening in write thread, so can't
   // happen while we're in the write thread
   autovector<ColumnFamilyData*> cfds;
   if (immutable_db_options_.atomic_flush) {
-    SelectColumnFamiliesForAtomicFlush(&cfds);
+    SelectColumnFamiliesForAtomicFlush(&cfds); // #### <<<<========
   } else {
     ColumnFamilyData* cfd_picked = nullptr;
     SequenceNumber seq_num_for_cf_picked = kMaxSequenceNumber;
 
     for (auto cfd : *versions_->GetColumnFamilySet()) {
+      // dehao : check this cfd
       if (cfd->IsDropped()) {
         continue;
       }
+      // dehao : check active memtable.
       if (!cfd->mem()->IsEmpty()) {
         // We only consider active mem table, hoping immutable memtable is
         // already in the process of flushing.
+        // dehao : this sequence id is that DB' lastest seq id when memtable is created.
         uint64_t seq = cfd->mem()->GetCreationSeq();
+        // dehao : we need to obtain the latest creation mamtable.
         if (cfd_picked == nullptr || seq < seq_num_for_cf_picked) {
           cfd_picked = cfd;
           seq_num_for_cf_picked = seq;
@@ -1384,7 +1394,7 @@ Status DBImpl::HandleWriteBufferFull(WriteContext* write_context) {
       }
     }
     if (cfd_picked != nullptr) {
-      cfds.push_back(cfd_picked);
+      cfds.push_back(cfd_picked); // #### <<<=========
     }
     MaybeFlushStatsCF(&cfds);
   }
@@ -1394,24 +1404,33 @@ Status DBImpl::HandleWriteBufferFull(WriteContext* write_context) {
       continue;
     }
     cfd->Ref();
-    status = SwitchMemtable(cfd, write_context);
+    status = SwitchMemtable(cfd, write_context); // ## <<<======
     cfd->Unref();
     if (!status.ok()) {
       break;
     }
   }
+
   if (status.ok()) {
     if (immutable_db_options_.atomic_flush) {
       AssignAtomicFlushSeq(cfds);
     }
     for (const auto cfd : cfds) {
-      cfd->imm()->FlushRequested();
+      // dehao : set variable flush_requested_ to true.
+      // dehao : when call IsFlushPending, return true.
+      cfd->imm()->FlushRequested(); // ## <<<<=======
     }
+
+    // dehao : cfds ---> FlushRequest
     FlushRequest flush_req;
     GenerateFlushRequest(cfds, &flush_req);
+
+    //dehao : push flush_request into flush_queue_
     SchedulePendingFlush(flush_req, FlushReason::kWriteBufferFull);
+
     MaybeScheduleFlushOrCompaction();
   }
+
   return status;
 }
 
@@ -1439,13 +1458,14 @@ Status DBImpl::DelayWrite(uint64_t num_bytes,
 
       // Notify write_thread_ about the stall so it can setup a barrier and
       // fail any pending writers with no_slowdown
-      write_thread_.BeginWriteStall();
+      write_thread_.BeginWriteStall(); // ###
       TEST_SYNC_POINT("DBImpl::DelayWrite:BeginWriteStallDone");
       mutex_.Unlock();
       // We will delay the write until we have slept for delay ms or
       // we don't need a delay anymore
       const uint64_t kDelayInterval = 1000;
       uint64_t stall_end = sw.start_time() + delay;
+      // dehao : WriteController will decide if still continue to stall.
       while (write_controller_.NeedsDelay()) {
         if (env_->NowMicros() >= stall_end) {
           // We already delayed this write `delay` microseconds
@@ -1457,7 +1477,7 @@ Status DBImpl::DelayWrite(uint64_t num_bytes,
         env_->SleepForMicroseconds(kDelayInterval);
       }
       mutex_.Lock();
-      write_thread_.EndWriteStall();
+      write_thread_.EndWriteStall(); // ####
     }
 
     // Don't wait if there's a background error, even if its a soft error. We
@@ -1630,7 +1650,7 @@ Status DBImpl::SwitchMemtable(ColumnFamilyData* cfd, WriteContext* context) {
   if (two_write_queues_) {
     // SwitchMemtable is a rare event. To simply the reasoning, we make sure
     // that there is no concurrent thread writing to WAL.
-    nonmem_write_thread_.EnterUnbatched(&nonmem_w, &mutex_);
+    nonmem_write_thread_.EnterUnbatched(&nonmem_w, &mutex_); // ##
   }
 
   std::unique_ptr<WritableFile> lfile;
@@ -1639,7 +1659,7 @@ Status DBImpl::SwitchMemtable(ColumnFamilyData* cfd, WriteContext* context) {
 
   // Recoverable state is persisted in WAL. After memtable switch, WAL might
   // be deleted, so we write the state to memtable to be persisted as well.
-  Status s = WriteRecoverableState();
+  Status s = WriteRecoverableState(); // ##
   if (!s.ok()) {
     return s;
   }
@@ -1650,7 +1670,7 @@ Status DBImpl::SwitchMemtable(ColumnFamilyData* cfd, WriteContext* context) {
     // Memtable writers may call DB::Get in case max_successive_merges > 0,
     // which may lock mutex. Unlocking mutex here to avoid deadlock.
     mutex_.Unlock();
-    write_thread_.WaitForMemTableWriters();
+    write_thread_.WaitForMemTableWriters(); // ##
     mutex_.Lock();
   }
 
@@ -1660,16 +1680,22 @@ Status DBImpl::SwitchMemtable(ColumnFamilyData* cfd, WriteContext* context) {
   if (two_write_queues_) {
     log_write_mutex_.Lock();
   }
+
+  // dehao : this variable decide if need to create new wal file.
   bool creating_new_log = !log_empty_;
   if (two_write_queues_) {
     log_write_mutex_.Unlock();
   }
+
+  // dehao : decide if need to use recycle log number for new wal file.
   uint64_t recycle_log_number = 0;
   if (creating_new_log && immutable_db_options_.recycle_log_file_num &&
       !log_recycle_files_.empty()) {
     recycle_log_number = log_recycle_files_.front();
     log_recycle_files_.pop_front();
   }
+
+  // dehao : new wal file.
   uint64_t new_log_number =
       creating_new_log ? versions_->NewFileNumber() : logfile_number_;
   const MutableCFOptions mutable_cf_options = *cfd->GetLatestMutableCFOptions();
@@ -1717,7 +1743,9 @@ Status DBImpl::SwitchMemtable(ColumnFamilyData* cfd, WriteContext* context) {
     assert(new_log != nullptr);
     if (!logs_.empty()) {
       // Alway flush the buffer of the last log before switching to a new one
+      // dehao : get old WAL from log_
       log::Writer* cur_log_writer = logs_.back().writer;
+      // dehao : flush old wal. 
       s = cur_log_writer->WriteBuffer();
       if (!s.ok()) {
         ROCKS_LOG_WARN(immutable_db_options_.info_log,
@@ -1731,6 +1759,7 @@ Status DBImpl::SwitchMemtable(ColumnFamilyData* cfd, WriteContext* context) {
       logfile_number_ = new_log_number;
       log_empty_ = true;
       log_dir_synced_ = false;
+      // dehao : put new_log into logs_.
       logs_.emplace_back(logfile_number_, new_log);
       alive_log_files_.push_back(LogFileNumberSize(logfile_number_)); // ##
     }
@@ -1779,13 +1808,14 @@ Status DBImpl::SwitchMemtable(ColumnFamilyData* cfd, WriteContext* context) {
 
   cfd->mem()->SetNextLogNumber(logfile_number_);
 
-  // ==> dehao : 
+  // ==> dehao : put old memtable into imm_
   cfd->imm()->Add(cfd->mem(), &context->memtables_to_free_);
 
   new_mem->Ref();
-  cfd->SetMemtable(new_mem);
+  // ==> dehao : use new memtable as current memtable which can receive writes.
+  cfd->SetMemtable(new_mem); // ##
 
-  // ==>> dehao : 
+  // ==>> dehao : xxx
   InstallSuperVersionAndScheduleWork(cfd, &context->superversion_context,
                                      mutable_cf_options);
   #ifndef ROCKSDB_LITE
