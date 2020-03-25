@@ -140,7 +140,7 @@ class CompactionJob {
 
   // CompactionJob state
   struct CompactionState;
-  CompactionState* compact_;
+  CompactionState* compact_; // ## <<<====
   CompactionJobStats* compaction_job_stats_;
   InternalStats::CompactionStats compaction_stats_;
 

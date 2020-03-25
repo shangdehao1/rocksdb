@@ -238,9 +238,8 @@ struct CompactionJob::SubcompactionState {
 struct CompactionJob::CompactionState {
   Compaction* const compaction;
 
-  // REQUIRED: subcompaction states are stored in order of increasing
-  // key-range
-  std::vector<CompactionJob::SubcompactionState> sub_compact_states;
+  // REQUIRED: subcompaction states are stored in order of increasing key-range
+  std::vector<CompactionJob::SubcompactionState> sub_compact_states; // ##
   Status status;
 
   uint64_t total_bytes;
@@ -415,17 +414,16 @@ void CompactionJob::Prepare() {
   if (c->ShouldFormSubcompactions()) {
     {
       StopWatch sw(env_, stats_, SUBCOMPACTION_SETUP_TIME);
-      GenSubcompactionBoundaries();
+      GenSubcompactionBoundaries(); // ## <<<===
     }
     assert(sizes_.size() == boundaries_.size() + 1);
 
     for (size_t i = 0; i <= boundaries_.size(); i++) {
       Slice* start = i == 0 ? nullptr : &boundaries_[i - 1];
       Slice* end = i == boundaries_.size() ? nullptr : &boundaries_[i];
-      compact_->sub_compact_states.emplace_back(c, start, end, sizes_[i]);
+      compact_->sub_compact_states.emplace_back(c, start, end, sizes_[i]); // ## <<===
     }
-    RecordInHistogram(stats_, NUM_SUBCOMPACTIONS_SCHEDULED,
-                      compact_->sub_compact_states.size());
+    RecordInHistogram(stats_, NUM_SUBCOMPACTIONS_SCHEDULED, compact_->sub_compact_states.size());
   } else {
     compact_->sub_compact_states.emplace_back(c, nullptr, nullptr);
   }
@@ -718,7 +716,7 @@ Status CompactionJob::Install(const MutableCFOptions& mutable_cf_options) {
       compact_->compaction->output_level(), thread_pri_, compaction_stats_);
 
   if (status.ok()) {
-    status = InstallCompactionResults(mutable_cf_options);
+    status = InstallCompactionResults(mutable_cf_options); // <<<====
   }
   VersionStorageInfo::LevelSummaryStorage tmp;
   auto vstorage = cfd->current()->storage_info();

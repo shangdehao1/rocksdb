@@ -6452,19 +6452,22 @@ class Benchmark {
 };
 
 int db_bench_tool(int argc, char** argv) {
+  std::cout << "=========================" << std::endl;
   rocksdb::port::InstallStackTraceHandler();
   static bool initialized = false;
   if (!initialized) {
-    SetUsageMessage(std::string("\nUSAGE:\n") + std::string(argv[0]) +
-                    " [OPTIONS]...");
+    std::cout << "SetUsageMessage...." << std::endl;
+    SetUsageMessage(std::string("\nUSAGE:\n") + std::string(argv[0]) + " [OPTIONS]...");
     initialized = true;
   }
+  std::cout << "ParseCommandLineFlags..." << std::endl;
   ParseCommandLineFlags(&argc, &argv, true);
+
   FLAGS_compaction_style_e = (rocksdb::CompactionStyle) FLAGS_compaction_style;
-#ifndef ROCKSDB_LITE
+  #ifndef ROCKSDB_LITE
+  std::cout << " ROCKSDB_LITE..." << std::endl;
   if (FLAGS_statistics && !FLAGS_statistics_string.empty()) {
-    fprintf(stderr,
-            "Cannot provide both --statistics and --statistics_string.\n");
+    fprintf(stderr, "Cannot provide both --statistics and --statistics_string.\n");
     exit(1);
   }
   if (!FLAGS_statistics_string.empty()) {
@@ -6477,8 +6480,10 @@ int db_bench_tool(int argc, char** argv) {
       exit(1);
     }
   }
-#endif  // ROCKSDB_LITE
+  #endif  // ROCKSDB_LITE
+
   if (FLAGS_statistics) {
+    std::cout << "CreateDBStatistics...." << std::endl;
     dbstats = rocksdb::CreateDBStatistics();
   }
   if (dbstats) {
@@ -6490,17 +6495,17 @@ int db_bench_tool(int argc, char** argv) {
       FLAGS_max_bytes_for_level_multiplier_additional, ',');
   for (size_t j = 0; j < fanout.size(); j++) {
     FLAGS_max_bytes_for_level_multiplier_additional_v.push_back(
-#ifndef CYGWIN
+        #ifndef CYGWIN
         std::stoi(fanout[j]));
-#else
-        stoi(fanout[j]));
-#endif
+        #else
+        stoi(fanout[j]);
+        #endif
   }
 
   FLAGS_compression_type_e =
     StringToCompressionType(FLAGS_compression_type.c_str());
 
-#ifndef ROCKSDB_LITE
+  #ifndef ROCKSDB_LITE
   if (!FLAGS_hdfs.empty() && !FLAGS_env_uri.empty()) {
     fprintf(stderr, "Cannot provide both --hdfs and --env_uri.\n");
     exit(1);
@@ -6511,7 +6516,7 @@ int db_bench_tool(int argc, char** argv) {
       exit(1);
     }
   }
-#endif  // ROCKSDB_LITE
+  #endif  // ROCKSDB_LITE
   if (FLAGS_use_existing_keys && !FLAGS_use_existing_db) {
     fprintf(stderr,
             "`-use_existing_db` must be true for `-use_existing_keys` to be "
@@ -6540,12 +6545,10 @@ int db_bench_tool(int argc, char** argv) {
 
   // Note options sanitization may increase thread pool sizes according to
   // max_background_flushes/max_background_compactions/max_background_jobs
-  FLAGS_env->SetBackgroundThreads(FLAGS_num_high_pri_threads,
-                                  rocksdb::Env::Priority::HIGH);
-  FLAGS_env->SetBackgroundThreads(FLAGS_num_bottom_pri_threads,
-                                  rocksdb::Env::Priority::BOTTOM);
-  FLAGS_env->SetBackgroundThreads(FLAGS_num_low_pri_threads,
-                                  rocksdb::Env::Priority::LOW);
+  std::cout << "setup background threads..." << std::endl;
+  FLAGS_env->SetBackgroundThreads(FLAGS_num_high_pri_threads, rocksdb::Env::Priority::HIGH);
+  FLAGS_env->SetBackgroundThreads(FLAGS_num_bottom_pri_threads, rocksdb::Env::Priority::BOTTOM);
+  FLAGS_env->SetBackgroundThreads(FLAGS_num_low_pri_threads, rocksdb::Env::Priority::LOW);
 
   // Choose a location for the test database if none given with --db=<path>
   if (FLAGS_db.empty()) {
@@ -6566,16 +6569,18 @@ int db_bench_tool(int argc, char** argv) {
     exit(1);
   }
 
+  std::cout << "create Benchmark object...." << std::endl;
   rocksdb::Benchmark benchmark;
+  std::cout << "benchmark running...." << std::endl;
   benchmark.Run();
 
-#ifndef ROCKSDB_LITE
+  #ifndef ROCKSDB_LITE
   if (FLAGS_print_malloc_stats) {
     std::string stats_string;
     rocksdb::DumpMallocStats(&stats_string);
     fprintf(stdout, "Malloc stats:\n%s\n", stats_string.c_str());
   }
-#endif  // ROCKSDB_LITE
+  #endif  // ROCKSDB_LITE
 
   return 0;
 }

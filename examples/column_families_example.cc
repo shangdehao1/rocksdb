@@ -18,8 +18,8 @@ int main() {
   // open DB
   Options options;
   options.create_if_missing = true;
-  DB* db;
-  Status s = DB::Open(options, kDBPath, &db);
+  DB* db; // ##
+  Status s = DB::Open(options, kDBPath, &db); // ## obtain db
   assert(s.ok());
 
   // create column family

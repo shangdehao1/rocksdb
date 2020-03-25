@@ -1,11 +1,4 @@
-//  Copyright (c) 2011-present, Facebook, Inc.  All rights reserved.
-//  This source code is licensed under both the GPLv2 (found in the
-//  COPYING file in the root directory) and Apache 2.0 License
-//  (found in the LICENSE.Apache file in the root directory).
-//
-// Copyright (c) 2011 The LevelDB Authors. All rights reserved.
-// Use of this source code is governed by a BSD-style license that can be
-// found in the LICENSE file. See the AUTHORS file for names of contributors.
+
 #include "db/db_impl/db_impl.h"
 
 #include <cinttypes>
@@ -69,9 +62,6 @@ Status DBImpl::WriteImpl(const WriteOptions& write_options,
                          bool disable_memtable, uint64_t* seq_used,
                          size_t batch_cnt,
                          PreReleaseCallback* pre_release_callback) {
-
-  // dehao : ===== some checking works ======
-  
   assert(!seq_per_batch_ || batch_cnt != 0);
   if (my_batch == nullptr) {
     return Status::Corruption("Batch is nullptr!");
@@ -110,8 +100,6 @@ Status DBImpl::WriteImpl(const WriteOptions& write_options,
     }
   }
 
-  // ====== dehao : wal-only =============
-
   if (two_write_queues_ && disable_memtable) {
     AssignOrder assign_order =
         seq_per_batch_ ? kDoAssignOrder : kDontAssignOrder;
@@ -122,8 +110,6 @@ Status DBImpl::WriteImpl(const WriteOptions& write_options,
                             pre_release_callback, assign_order,
                             kDontPublishLastSeq, disable_memtable);
   }
-
-  // ======== dehao : unordered write =========
 
   if (immutable_db_options_.unordered_write) {
     const size_t sub_batch_cnt = batch_cnt != 0
@@ -150,8 +136,6 @@ Status DBImpl::WriteImpl(const WriteOptions& write_options,
     return status;
   }
 
-  // ======== dehao : pipe line write =========
-  
   if (immutable_db_options_.enable_pipelined_write) {
     return PipelinedWriteImpl(write_options, my_batch, callback, log_used,
                               log_ref, disable_memtable, seq_used);

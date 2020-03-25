@@ -2030,8 +2030,7 @@ void DBImpl::MaybeScheduleFlushOrCompaction() {
     return;
   }
 
-  // dehao : check if there exist exclusive manual compaction....
-  //         -- if yes, directly return.
+  // dehao : check if each element of manual_compaction_dequeue_  is exclusive
   if (HasExclusiveManualCompaction()) {
     // only manual compactions are allowed to run. don't schedule automatic
     // compactions

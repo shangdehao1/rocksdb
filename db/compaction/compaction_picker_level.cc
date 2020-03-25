@@ -19,29 +19,24 @@ namespace rocksdb {
 
 bool LevelCompactionPicker::NeedsCompaction(
     const VersionStorageInfo* vstorage) const {
-  // dehao 1
+
   if (!vstorage->ExpiredTtlFiles().empty()) {
     return true;
   }
-  // dehao 2 : check files_marked_for_compaction_
-  //           you need to check this queue all updates code...
+
   if (!vstorage->FilesMarkedForPeriodicCompaction().empty()) {
     return true;
   }
 
-  // dehao 3 : check bottommost_files_marked_for_compaction_
   if (!vstorage->BottommostFilesMarkedForCompaction().empty()) {
     return true;
   }
+
   if (!vstorage->FilesMarkedForCompaction().empty()) {
     return true;
   }
 
-  // dehao !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-  // dehao : the most important variable : compaction_cores_ and compaction_level_
-  // dehao need to read all operation codes about operating these two variable....
   for (int i = 0; i <= vstorage->MaxInputLevel(); i++) {
-    // dehao should check compaction_cores_ all operations.
     if (vstorage->CompactionScore(i) >= 1) {
       return true;
     }
